@@ -4,6 +4,8 @@ import tiktoken
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+torch.manual_seed(42)
+
 
 def get_dataset():
     return "A quick brown fox jumped over a little lazy dog " * 4
@@ -51,6 +53,30 @@ def create_embeddings_layer(vocab_size, embedding_dim):
 def create_pos_embeddings_layer(context_len, embedding_dim):
     return torch.nn.Embedding(context_len, embedding_dim)
 
+# Attention mechanisms
+## Basic attention mechanism
+##
+## The goal is to create a embeddings for each word.
+## It should represent how much attention is to be
+## given to each word w.r.t. the current word.
+## The token would contain a sequence of shape: [batch_size, context_len, embedding_dim]
+## The output should be of the shape:           [batch_size, context_len, embedding_dim]
+def basic_attention_mechanism(input):
+    # 1. Find cosine similarity of each word with each other word
+    cos_sim = input @ input.transpose(1, 2)
+    print(f'{cos_sim.shape = }')
+
+    # 2. Normalize with softmax
+    attn_scores = torch.softmax(cos_sim, dim=-1)
+    print(f'{attn_scores.shape = }')
+    print(f'attn_scores sum:\n{attn_scores.sum(dim=-1)}')
+
+    # 3. Compute outputs (The weighted sum of inputs)
+    output = attn_scores @ input
+    print(f'{output.shape = }')
+
+    return output
+
 
 
 def main():
@@ -81,6 +107,8 @@ def main():
 
     input_embeddings = token_embeddings + pos_embeddings
     print(f'{input_embeddings.shape = }')
+
+    basic_attention_mechanism(input_embeddings)
     
 
 
