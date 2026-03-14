@@ -88,8 +88,6 @@ class SelfAttention(nn.Module):
         self.W_query = nn.Linear(input_dim, output_dim, bias=qkv_bias)
         self.W_value = nn.Linear(input_dim, output_dim, bias=qkv_bias)
 
-        print(f'Shape should be: ({input_dim, output_dim})')
-        print(f'Shape is:        ({self.W_key.weight.shape})')
 
     def forward(self, x):
         ## Note: All the dimensions written ignore the batch
@@ -114,6 +112,47 @@ class SelfAttention(nn.Module):
         context_vec = attn_weights @ values
         return context_vec
 
+
+class CausalAttention(nn.Module):
+    def __init__(self, input_dim, output_dim, context_length, dropout, qkv_bias=False):
+        super().__init__()
+
+        self.W_query = nn.Linear(input_dim, output_dim, bias=qkv_bias)
+        self.W_key = nn.Linear(input_dim, output_dim, bias=qkv_bias)
+        self.W_value = nn.Linear(input_dim, output_dim, bias=qkv_bias)
+
+        self.register_buffer(
+            "mask",
+            torch.triu(
+                torch.ones(context_length, context_length),
+                diagonal=1
+            ).bool(),
+        )
+
+        self.dropout = nn.Dropout(dropout)
+
+    
+    def forward(self, x):
+        b, num_tokens, d_in = x.shape
+
+        key = self.W_key(x)
+        query = self.W_query(x)
+        value = self.W_value(x)
+
+        attn_score = query @ key.transpose(1, 2)
+        attn_score.masked_fill_(
+            self.mask[:num_tokens, :num_tokens], -torch.inf
+        )
+
+        attn_weights = torch.softmax(
+            attn_score / query.shape[-1] ** 0.5,
+            dim=-1,
+        )
+
+        attn_weights = self.dropout(attn_weights)
+
+        context_vec = attn_weights @ value
+        return context_vec
 
 
 def main():
@@ -153,6 +192,13 @@ def main():
     print(f'{sa_out.shape = }')
     sa_out_norm = linalg.norm(sa_out.flatten(), ord=2)
     print(f'{sa_out_norm = }')
+
+    output_dim = 5
+    self_attention = CausalAttention(embedding_dim, output_dim, context_len, 0.2)
+    ca_out = self_attention(input_embeddings)
+    print(f'{ca_out.shape = }')
+    ca_out_norm = linalg.norm(ca_out.flatten(), ord=2)
+    print(f'{ca_out_norm = }')
     
 
 
