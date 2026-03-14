@@ -3,6 +3,9 @@ import re
 import tiktoken
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torch import nn
+
+import torch.linalg as linalg
 
 torch.manual_seed(42)
 
@@ -78,6 +81,40 @@ def basic_attention_mechanism(input):
     return output
 
 
+class SelfAttention(nn.Module):
+    def __init__(self, input_dim, output_dim, qkv_bias=False):
+        super().__init__()
+        self.W_key = nn.Linear(input_dim, output_dim, bias=qkv_bias)
+        self.W_query = nn.Linear(input_dim, output_dim, bias=qkv_bias)
+        self.W_value = nn.Linear(input_dim, output_dim, bias=qkv_bias)
+
+        print(f'Shape should be: ({input_dim, output_dim})')
+        print(f'Shape is:        ({self.W_key.weight.shape})')
+
+    def forward(self, x):
+        ## Note: All the dimensions written ignore the batch
+        ## size, torch would take care of batching itself. 
+        # c => context_length
+        # n => batch_size
+        # h => embedding dim
+        # o => output dim
+        # x                             # c, h
+        # Calculate attention score
+        keys = self.W_key(x)           # c, o
+        queries = self.W_query(x)      # c, o
+        values = self.W_value(x)       # c, o
+
+        # Attention score = query * key
+        attn_scores = queries @ keys.transpose(1, 2)
+        attn_weights = torch.softmax(
+            attn_scores / (keys.shape[-1] ** 0.5), dim=-1
+        )
+        # attn_weights                 # c, c
+        # context_vec would be the weighted sum of values
+        context_vec = attn_weights @ values
+        return context_vec
+
+
 
 def main():
     # Get dataset
@@ -108,7 +145,14 @@ def main():
     input_embeddings = token_embeddings + pos_embeddings
     print(f'{input_embeddings.shape = }')
 
-    basic_attention_mechanism(input_embeddings)
+    # basic_attention_mechanism(input_embeddings)
+
+    output_dim = 128
+    self_attention = SelfAttention(embedding_dim, output_dim)
+    sa_out = self_attention(input_embeddings)
+    print(f'{sa_out.shape = }')
+    sa_out_norm = linalg.norm(sa_out.flatten(), ord=2)
+    print(f'{sa_out_norm = }')
     
 
 
