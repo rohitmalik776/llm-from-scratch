@@ -121,6 +121,7 @@ class CausalAttention(nn.Module):
         self.W_key = nn.Linear(input_dim, output_dim, bias=qkv_bias)
         self.W_value = nn.Linear(input_dim, output_dim, bias=qkv_bias)
 
+        self.mask: torch.Tensor
         self.register_buffer(
             "mask",
             torch.triu(
@@ -153,6 +154,83 @@ class CausalAttention(nn.Module):
 
         context_vec = attn_weights @ value
         return context_vec
+    
+class MultiHeadAttentionWrapper(nn.Module):
+    def __init__(self, input_dim, output_dim, context_len, dropout, num_heads, qkv_bias=False):
+        super().__init__()
+
+        self.heads = nn.ModuleList([
+            CausalAttention(input_dim, output_dim, context_len, dropout, qkv_bias=qkv_bias)
+            for _ in range(num_heads)
+        ])
+
+
+    def forward(self, x):
+        return torch.cat([head(x) for head in self.heads], dim=-1,)
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, input_dim, output_dim, context_len, dropout, num_heads, qkv_bias=False):
+        super().__init__()
+
+        assert output_dim % num_heads == 0, "output dimension should be divisible by num_heads"
+
+        self.num_heads = num_heads
+        self.head_dim = output_dim // num_heads
+        self.output_dim = output_dim
+
+        self.W_query = nn.Linear(input_dim, output_dim, bias=qkv_bias)
+        self.W_key = nn.Linear(input_dim, output_dim, bias=qkv_bias)
+        self.W_value = nn.Linear(input_dim, output_dim, bias=qkv_bias)
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.mask: torch.Tensor
+        self.register_buffer(
+            "mask",
+            torch.triu(
+                torch.ones(context_len, context_len), diagonal=1
+            ).bool()
+        )
+
+        self.out_proj = nn.Linear(output_dim, output_dim)
+
+    
+    def forward(self, x):
+        b, seq_len, _ = x.shape
+
+        queries = self.W_query(x)
+        keys = self.W_key(x)
+        values = self.W_value(x)
+
+        ## Split the dimensions of qkv matrices
+        ## into multiple heads intrinsically
+        queries = queries.view(b, seq_len, self.num_heads, self.head_dim)
+        keys = keys.view(b, seq_len, self.num_heads, self.head_dim)
+        values = values.view(b, seq_len, self.num_heads, self.head_dim)
+
+        queries = queries.transpose(1, 2)
+        keys = keys.transpose(1, 2)
+        values = values.transpose(1, 2)
+
+        attn_scores = queries @ keys.transpose(2, 3)
+        attn_scores.masked_fill_(self.mask[:seq_len, :seq_len], -torch.inf)
+        attn_weights = torch.softmax(
+            attn_scores / self.head_dim ** 0.5,
+            dim=-1,
+        )
+
+        attn_weights = self.dropout(attn_weights)
+
+        # attn_weights : (b, num_heads, context_len, context_len)
+        # values       : (b, num_heads, context_len, head_dim)
+        context_vec = attn_weights @ values
+        context_vec = context_vec.transpose(1, 2)
+        context_vec = context_vec.contiguous().view(b, seq_len, self.output_dim)
+
+        context_vec = self.out_proj(context_vec)
+        return context_vec
+
 
 
 def main():
@@ -193,12 +271,22 @@ def main():
     sa_out_norm = linalg.norm(sa_out.flatten(), ord=2)
     print(f'{sa_out_norm = }')
 
-    output_dim = 5
+    output_dim = 128
     self_attention = CausalAttention(embedding_dim, output_dim, context_len, 0.2)
     ca_out = self_attention(input_embeddings)
     print(f'{ca_out.shape = }')
     ca_out_norm = linalg.norm(ca_out.flatten(), ord=2)
     print(f'{ca_out_norm = }')
+
+    
+    output_dim = 128
+    num_heads = 4
+    mha_attention = MultiHeadAttention(embedding_dim, output_dim, context_len, 0.2, num_heads)
+
+    mha_out = mha_attention(input_embeddings)
+    print(f'{mha_out.shape = }')
+    mha_out_norm = linalg.norm(mha_out.flatten(), ord=2)
+    print(f'{mha_out_norm = }')
     
 
 
