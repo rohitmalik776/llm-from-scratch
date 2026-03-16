@@ -232,7 +232,6 @@ class MultiHeadAttention(nn.Module):
         return context_vec
 
 
-
 def main():
     # Get dataset
     dataset = get_dataset()

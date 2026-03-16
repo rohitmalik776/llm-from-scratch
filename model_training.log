@@ -1,0 +1,64 @@
+Total parameter count of GPTModel: 162419712
+out head param count: 38597376
+Total params without out head: 123822336
+Total size of the model: 619.58 MB
+==================== MODEL BUILDING END ====================
+==================== START OF MODEL TRAINING ====================
+Total tokens in dataset: 5410
+Tokens in train_loader: 10
+Tokens in val_loader: 1
+10.991318035125733
+10.991316795349121
+	Epoch: 0 - (Step:  00000)
+		Training loss: 9.751796245574951, Validation loss: 9.978826522827148
+	Epoch: 0 - (Step:  00005)
+		Training loss: 8.063185262680054, Validation loss: 8.205572128295898
+Output text: This is a great opportunity to  the   the  the  the     the    the  the   the  the  the   the  the  the  the   the  the  the    the  the 
+	Epoch: 1 - (Step:  00010)
+		Training loss: 6.807430601119995, Validation loss: 7.09519624710083
+	Epoch: 1 - (Step:  00015)
+		Training loss: 6.237905597686767, Validation loss: 6.677480220794678
+Output text: This is a great opportunity to " " " " " " " " " " " " " " " " " " " " " " " " "
+	Epoch: 2 - (Step:  00020)
+		Training loss: 6.0212891578674315, Validation loss: 6.571808815002441
+	Epoch: 2 - (Step:  00025)
+		Training loss: 5.682876682281494, Validation loss: 6.56997013092041
+Output text: This is a great opportunity to I. II. II I. I to the I of the I was. I the I, and I the I to the to the I, and I, and the
+	Epoch: 3 - (Step:  00030)
+		Training loss: 5.4229809761047365, Validation loss: 6.625727653503418
+	Epoch: 3 - (Step:  00035)
+		Training loss: 5.281134176254272, Validation loss: 6.42934513092041
+Output text: This is a great opportunity to "I "I, and " "I, and "I, and "I, and "I "I, and I had the ", and, and "I "I, and
+	Epoch: 4 - (Step:  00040)
+		Training loss: 4.948221635818482, Validation loss: 6.363577365875244
+	Epoch: 4 - (Step:  00045)
+		Training loss: 4.414487624168396, Validation loss: 6.2580108642578125
+Output text: This is a great opportunity to "Oh, and I had "I "Oh, and I had the "I had been. "Oh, "Oh, and I had the "Oh, and "Oh, and I had to the
+	Epoch: 5 - (Step:  00050)
+		Training loss: 4.112608861923218, Validation loss: 6.24108362197876
+	Epoch: 5 - (Step:  00055)
+		Training loss: 3.682403826713562, Validation loss: 6.2292561531066895
+Output text: This is a great opportunity to me. "Oh, and his pictures-- "Oh, and "Oh, and I had been his pictures--I had "I had "Oh, and "I had been "I had been, and,
+	Epoch: 6 - (Step:  00060)
+		Training loss: 3.283159375190735, Validation loss: 6.211311340332031
+	Epoch: 6 - (Step:  00065)
+		Training loss: 2.8497267961502075, Validation loss: 6.229834079742432
+Output text: This is a great opportunity to me. "I had a "I had a "--the he had not of the "I was "I "Oh, and I had the picture better; and, and "Oh, and, and--
+	Epoch: 7 - (Step:  00070)
+		Training loss: 2.4953570127487184, Validation loss: 6.204179286956787
+	Epoch: 7 - (Step:  00075)
+		Training loss: 2.185911512374878, Validation loss: 6.211938858032227
+Output text: This is a great opportunity to me. "Oh, I was his wife would have "--the his own "Oh, he was silent; and I felt him close "Oh, with the and I followed her between the " "Oh, with
+	Epoch: 8 - (Step:  00080)
+		Training loss: 1.8248895764350892, Validation loss: 6.2206034660339355
+	Epoch: 8 - (Step:  00085)
+		Training loss: 1.5446458816528321, Validation loss: 6.263972282409668
+Output text: This is a great opportunity to me. "Oh, I was his wife would have "--I had the light through curtains of his! I felt able to "Oh, you know," Mrs. Gisburn said with pardonable pride. "The
+	Epoch: 9 - (Step:  00090)
+		Training loss: 1.2210245490074159, Validation loss: 6.291050434112549
+	Epoch: 9 - (Step:  00095)
+		Training loss: 0.9935496687889099, Validation loss: 6.334056377410889
+Output text: This is a great opportunity to me I the first dabble any more, the first stroke, I had sent all my He was silent; but I felt him close behind me, my companion turned into a serious desire to understand him better. I looked
+[9.751796245574951, 8.063185262680054, 6.807430601119995, 6.237905597686767, 6.0212891578674315, 5.682876682281494, 5.4229809761047365, 5.281134176254272, 4.948221635818482, 4.414487624168396, 4.112608861923218, 3.682403826713562, 3.283159375190735, 2.8497267961502075, 2.4953570127487184, 2.185911512374878, 1.8248895764350892, 1.5446458816528321, 1.2210245490074159, 0.9935496687889099]
+[9.978826522827148, 8.205572128295898, 7.09519624710083, 6.677480220794678, 6.571808815002441, 6.56997013092041, 6.625727653503418, 6.42934513092041, 6.363577365875244, 6.2580108642578125, 6.24108362197876, 6.2292561531066895, 6.211311340332031, 6.229834079742432, 6.204179286956787, 6.211938858032227, 6.2206034660339355, 6.263972282409668, 6.291050434112549, 6.334056377410889]
+[512, 3072, 5376, 7936, 10240, 12800, 15104, 17664, 19968, 22528, 24832, 27392, 29696, 32256, 34560, 37120, 39424, 41984, 44288, 46848]

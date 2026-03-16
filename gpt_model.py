@@ -1,8 +1,14 @@
+import sys
+
 import torch
 from torch import nn
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+
 import tiktoken
 
 from main import MultiHeadAttention
+from gpt_model_data import get_verdict_dataloaders
 
 
 class GPTModel(nn.Module):
@@ -140,7 +146,7 @@ class FeedForward(nn.Module):
 
 GPT_CONFIG_124M = {
     "vocab_size": 50257,
-    "context_length": 1024,
+    "context_length": 256,
     "emb_dim": 768,
     "n_heads": 12,
     "n_layers": 12,
@@ -148,22 +154,138 @@ GPT_CONFIG_124M = {
     "qkv_bias": False
 }
 
+
+def generate_text_simple(model, idx, max_new_tokens, context_size):
+    for _ in range(max_new_tokens):
+        idx_cond = idx[:, -context_size:]
+        with torch.no_grad():
+            logits = model(idx_cond)
+        
+        logits = logits[:, -1, :]
+        probas = torch.softmax(logits, dim=-1)
+        idx_next = torch.argmax(probas, dim=-1, keepdim=True)
+        idx = torch.cat((idx, idx_next), dim=1)
+
+    return idx
+
+
+def text_to_token_ids(text, tokenizer):
+    encodings = tokenizer.encode(text, allowed_special={'<|endoftext|>'})
+    encodings = torch.tensor(encodings).unsqueeze(0)
+    return encodings
+
+
+def token_ids_to_text(token_ids, tokenizer):
+    token_ids = token_ids.squeeze(0)
+    text = tokenizer.decode(token_ids.tolist())
+    return text
+
+
+def calc_loss_batch(inputs, targets, model, device):
+    inputs = inputs.to(device)
+    targets = targets.to(device)
+
+    outputs = model(inputs)
+
+    loss = torch.nn.functional.cross_entropy(
+        input = outputs.flatten(0, 1),
+        target = targets.flatten(),
+    )
+
+    return loss
+
+def calc_loss_loader(dataloader, model, device):
+    loss = 0.
+    total_samples = len(dataloader)
+
+    for inputs, targets in dataloader:
+        loss += calc_loss_batch(inputs, targets, model, device).item()
+
+    return loss / total_samples
+
+
+def generate_and_print_sample(model, start_context, tokenizer, device):
+    model.eval()
+
+    token_ids = text_to_token_ids(start_context, tokenizer)
+    context_len = model.pos_embedding.weight.shape[0]
+    with torch.no_grad():
+        output = generate_text_simple(model, token_ids, 50, context_len)
+    output_text = token_ids_to_text(output, tokenizer)
+
+    print(f'Output text: {output_text.replace("\n", " ")}')
+    model.train()
+
+
+def evaluate_model(model, train_loader, val_loader, device):
+
+    model.eval()
+
+    train_loss = calc_loss_loader(train_loader, model, device)
+    val_loss = calc_loss_loader(val_loader, model, device)
+
+    model.train()
+
+    return train_loss, val_loss
+
+
+
+def train_model_simple(model, tokenizer, train_loader, val_loader, epochs, optimizer:torch.optim.Optimizer, sample_text, device):
+    global_step = -1
+    tokens_seen = 0
+
+    train_losses = []
+    val_losses = []
+    track_tokens_seen = []
+
+    for epoch in range(epochs):
+        model.train()
+        
+        for (inputs, targets) in train_loader:
+            optimizer.zero_grad()
+            loss = calc_loss_batch(inputs, targets, model, device)
+            loss.backward()
+            optimizer.step()
+
+            tokens_seen += inputs.numel()
+
+            global_step += 1
+            if global_step % 5 == 0:
+                train_loss, val_loss = evaluate_model(model, train_loader, val_loader, device)
+                print(f'\tEpoch: {epoch} - (Step: {global_step: 06d})\n\t\tTraining loss: {train_loss}, Validation loss: {val_loss}')
+                train_losses.append(train_loss)
+                val_losses.append(val_loss)
+                track_tokens_seen.append(tokens_seen)
+        
+        generate_and_print_sample(model, sample_text, tokenizer, device)
+
+        sys.stdout.flush()
+
+    return train_losses, val_losses, track_tokens_seen
+
+
+def plot_losses(epochs_seen, tokens_seen, train_losses, val_losses):
+    fig, ax1 = plt.subplots(figsize=(5, 3))
+    ax1.plot(epochs_seen, train_losses, label="Training loss")
+    ax1.plot(
+        epochs_seen, val_losses, linestyle="-.", label="Validation loss"
+    )
+    ax1.set_xlabel("Epochs")
+    ax1.set_ylabel("Loss")
+    ax1.legend(loc="upper right")
+    ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax2 = ax1.twiny()
+    ax2.plot(tokens_seen, train_losses, alpha=0)
+    ax2.set_xlabel("Tokens seen")
+    fig.tight_layout()
+    plt.savefig('./model_training_stats.png')
+
+
 def main():
     tokenizer = tiktoken.get_encoding("gpt2")
-    batch = []
-    txt1 = "Arch is so cool"
-    txt2 = "Especially with Gnome"
-    batch.append(torch.tensor(tokenizer.encode(txt1)))
-    batch.append(torch.tensor(tokenizer.encode(txt2)))
-
-    batch = torch.stack(batch, dim=0)
-    print(f'{batch = }')
-
     torch.manual_seed(123)
     model = GPTModel(GPT_CONFIG_124M)
-    logits = model(batch)
-    print("Output shape:", logits.shape)
-    
+
     param_count = sum(p.numel() for p in model.parameters())
     print(f'Total parameter count of GPTModel: {param_count}')
     out_head_param_count = sum(p.numel() for p in model.out_head.parameters())
@@ -173,6 +295,54 @@ def main():
     total_bytes = param_count * 4
     total_size_mb = total_bytes / (1024 * 1024)
     print(f"Total size of the model: {total_size_mb:.2f} MB")
+
+    print('=' * 20, f'MODEL BUILDING END', '=' * 20)
+    print("=" * 20, "START OF MODEL TRAINING", "=" * 20)
+    
+    train_loader, val_loader = get_verdict_dataloaders(
+        batch_size=2,
+        tokenizer=tokenizer,
+        train_ratio=0.9,
+        max_length=GPT_CONFIG_124M['context_length'],
+        stride=GPT_CONFIG_124M['context_length'],
+    )
+
+    print(f'Tokens in train_loader: {len(train_loader)}')
+    print(f'Tokens in val_loader: {len(val_loader)}')
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model.to(device)
+
+    with torch.no_grad():
+        print(calc_loss_loader(train_loader, model, device))
+        print(calc_loss_loader(val_loader, model, device))
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=0.0004,
+        weight_decay=0.1
+    )
+
+    num_epochs = 10
+
+    train_losses, val_losses, tokens_seen = train_model_simple(
+        model,
+        tokenizer,
+        train_loader,
+        val_loader,
+        num_epochs,
+        optimizer,
+        "This is a great opportunity to",
+        device
+    )
+
+    print(train_losses)
+    print(val_losses)
+    print(tokens_seen)
+
+    epochs_tensor = torch.linspace(0, num_epochs, len(train_losses))
+    plot_losses(epochs_tensor, tokens_seen, train_losses, val_losses)
 
 
 
