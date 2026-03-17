@@ -221,7 +221,7 @@ def calc_loss_loader(dataloader, model, device):
 def generate_and_print_sample(model, start_context, tokenizer, device):
     model.eval()
 
-    token_ids = text_to_token_ids(start_context, tokenizer)
+    token_ids = text_to_token_ids(start_context, tokenizer).to(device)
     context_len = model.pos_embedding.weight.shape[0]
     with torch.no_grad():
         output = generate_text(model, token_ids, 50, context_len, top_k=4, temperature=2)
