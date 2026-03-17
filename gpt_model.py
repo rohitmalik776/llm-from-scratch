@@ -30,7 +30,7 @@ class GPTModel(nn.Module):
         batch_size, seq_len = in_idx.shape
 
         tok_embeds = self.tok_embedding(in_idx)
-        pos_embeds = self.pos_embedding(torch.arange(seq_len))
+        pos_embeds = self.pos_embedding(torch.arange(seq_len, device=in_idx.device))
 
         x = tok_embeds + pos_embeds
         x = self.emb_dropout(x)
@@ -59,7 +59,6 @@ class TransformerBlock(nn.Module):
 
         self.norm2 = LayerNorm(cfg['emb_dim'])
         self.ffn = FeedForward(cfg)
-        self.dropout2 = nn.Dropout(cfg['drop_rate'])
 
     def forward(self, x):
         shortcut = x
@@ -100,7 +99,7 @@ class GELU(nn.Module):
 
     def forward(self, x):
         return 0.5 * x * (1 + torch.tanh(
-            torch.sqrt(torch.tensor(2.0 / torch.pi)) *
+            (2.0 / torch.pi) *
             (x + 0.044715 * torch.pow(x, 3))
         ))
     
@@ -155,15 +154,30 @@ GPT_CONFIG_124M = {
 }
 
 
-def generate_text_simple(model, idx, max_new_tokens, context_size):
+def generate_text(model, idx, max_new_tokens, context_size, top_k=None, temperature=1.0):
     for _ in range(max_new_tokens):
         idx_cond = idx[:, -context_size:]
         with torch.no_grad():
             logits = model(idx_cond)
         
         logits = logits[:, -1, :]
+
+        if top_k is not None:
+            top_k_vals, _ = torch.topk(logits, top_k)
+            smallest_value = top_k_vals[:, -1]
+
+            logits = torch.where(
+                logits < smallest_value,
+                -torch.inf,
+                logits,
+            )
+        
+        logits /= temperature
+
+        
         probas = torch.softmax(logits, dim=-1)
-        idx_next = torch.argmax(probas, dim=-1, keepdim=True)
+        idx_next = torch.multinomial(probas, 1)
+
         idx = torch.cat((idx, idx_next), dim=1)
 
     return idx
@@ -210,7 +224,7 @@ def generate_and_print_sample(model, start_context, tokenizer, device):
     token_ids = text_to_token_ids(start_context, tokenizer)
     context_len = model.pos_embedding.weight.shape[0]
     with torch.no_grad():
-        output = generate_text_simple(model, token_ids, 50, context_len)
+        output = generate_text(model, token_ids, 50, context_len, top_k=4, temperature=2)
     output_text = token_ids_to_text(output, tokenizer)
 
     print(f'Output text: {output_text.replace("\n", " ")}')
@@ -281,6 +295,19 @@ def plot_losses(epochs_seen, tokens_seen, train_losses, val_losses):
     plt.savefig('./model_training_stats.png')
 
 
+def save_model(model: nn.Module, path):
+    torch.save(model.state_dict(), path)
+
+
+def load_model_(model: nn.Module, path, device):
+    try:
+        state_dict = torch.load(path, map_location=device)
+        model.load_state_dict(state_dict=state_dict)
+        print('Loaded model successfully!')
+    except FileNotFoundError as e:
+        print(f'Error while loading model: {e}')
+
+
 def main():
     tokenizer = tiktoken.get_encoding("gpt2")
     torch.manual_seed(123)
@@ -298,6 +325,8 @@ def main():
 
     print('=' * 20, f'MODEL BUILDING END', '=' * 20)
     print("=" * 20, "START OF MODEL TRAINING", "=" * 20)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     train_loader, val_loader = get_verdict_dataloaders(
         batch_size=2,
@@ -310,9 +339,9 @@ def main():
     print(f'Tokens in train_loader: {len(train_loader)}')
     print(f'Tokens in val_loader: {len(val_loader)}')
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     model.to(device)
+
+    load_model_(model, './saved_model.pth', device=device)
 
     with torch.no_grad():
         print(calc_loss_loader(train_loader, model, device))
@@ -337,14 +366,10 @@ def main():
         device
     )
 
-    print(train_losses)
-    print(val_losses)
-    print(tokens_seen)
-
     epochs_tensor = torch.linspace(0, num_epochs, len(train_losses))
     plot_losses(epochs_tensor, tokens_seen, train_losses, val_losses)
 
-
+    save_model(model, './saved_model.pth')
 
 
 if __name__ == '__main__':

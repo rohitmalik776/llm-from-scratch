@@ -55,7 +55,7 @@ def get_verdict_dataloaders(
         stride: int,
         shuffle_train=True, 
         num_workers=0,
-        pin_memory=True
+        pin_memory=True,
     ):
     text = load_text_dataset(path=THE_VERDICT_DATASET_PATH)
     token_ids = tokenize_dataset(text, tokenizer=tokenizer)
