@@ -13,13 +13,38 @@ torch.manual_seed(42)
 
 class ProcessDolly15k():
     def __init__(self):
-        pass
+        ds = self.load_dolly_15k()
+        ds = ds.shuffle()
+        ds = ds['train'].select(range(8000))
+        ds = ds.remove_columns(['category'])
+        ds = ds.rename_columns({"instruction": "question", "response": "answer"})
+        
+        ds = self.format_ds(ds)
+
+        # Processing steps here
+
+        self.ds = ds
+
 
     def load_dolly_15k(self, verbose=False):
         ds = datasets.load_dataset('databricks/databricks-dolly-15k')
         if verbose:
             print(f'dolly_15k: \n{ds}')
 
+        return ds
+
+
+    def format_ds(self, ds):
+        def format_fn(item):
+            answer = item['answer']
+            status = 'ANSWERABLE'
+            reason = 'null'
+
+            answer = '{' + f'\n"status": "{status}",\n"answer": "{answer}",\n"reason": {reason}\n' + '}'
+            item['answer'] = answer
+            return item
+
+        ds = ds.map(format_fn)
         return ds
 
 
@@ -34,6 +59,7 @@ class ProcessGSM8k():
         ds = self.split_context_question(ds)
         ds = self.poison_random_samples(ds, negative_ratio=0.3)
         ds = self.format_ds(ds)
+        ds = ds.remove_columns(["status", "reason"])
 
         ds = ds.shuffle()
 
@@ -161,15 +187,24 @@ class ProcessGSM8k():
 
 
 def main():
-    verbose = True
+    # verbose = True
     gsm = ProcessGSM8k()
     print(gsm.ds)
-    for i in range(len(gsm.ds)):
-        print('q: ', gsm.ds[i]['question'])
-        print('c: ', gsm.ds[i]['context'])
-        print('a: ', gsm.ds[i]['answer'])
-        print('-' * 50)
 
+    # for i in range(len(gsm.ds)):
+    #     print('q: ', gsm.ds[i]['question'])
+    #     print('c: ', gsm.ds[i]['context'])
+    #     print('a: ', gsm.ds[i]['answer'])
+    #     print('-' * 50)
+
+    dolly = ProcessDolly15k()
+    print(dolly.ds)
+
+    # for i in range(len(dolly.ds)):
+    #     print('q: ', dolly.ds[i]['question'])
+    #     print('c: ', dolly.ds[i]['context'])
+    #     print('a: ', dolly.ds[i]['answer'])
+    #     print('-' * 50)
 
 if __name__ == '__main__':
     main()
