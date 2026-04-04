@@ -115,3 +115,7 @@ def load_gpt2_params_from_tf_ckpt(ckpt_path, settings):
         target_dict[last_key] = variable_array
 
     return params
+
+
+if __name__ == '__main__':
+    download_and_load_gpt2('124M', './gpt2/')

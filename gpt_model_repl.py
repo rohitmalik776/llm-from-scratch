@@ -53,6 +53,7 @@ def generate_sample(model, start_context, tokenizer, device, top_k, temperature)
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f'Using device: {device}')
     model, tokenizer = load_model_tokenizer(device)
     model.eval()
 

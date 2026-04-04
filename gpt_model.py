@@ -15,7 +15,7 @@ from main import MultiHeadAttention
 from gpt_model_data import get_verdict_dataloaders
 
 
-LOAD_HF_GPT2 = True
+LOAD_HF_GPT2 = False
 
 
 class GPTModel(nn.Module):
@@ -153,7 +153,7 @@ class FeedForward(nn.Module):
 
 GPT_CONFIG_124M = {
     "vocab_size": 50257,
-    "context_length": 1024,
+    "context_length": 256,
     "emb_dim": 768,
     "n_heads": 12,
     "n_layers": 12,
