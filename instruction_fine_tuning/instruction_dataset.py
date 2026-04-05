@@ -4,27 +4,45 @@ import random
 import datasets
 from datasets import concatenate_datasets
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+import tiktoken
+from matplotlib import pyplot as plt
 
 
 random.seed(42)
 torch.manual_seed(42)
 
 
-class ProcessDolly15k():
+class BaseProcessDataset():
+    def create_and_assign_ds_split(self, ds):
+        TEST_RATIO = 0.15
+        VAL_RATIO = 0.05
+        TRAIN_RATIO = 1 - TEST_RATIO - VAL_RATIO
+
+        ds = ds.train_test_split(train_size=TRAIN_RATIO, shuffle=True)
+
+        train_ds = ds['train']
+        test_ds = ds['test'].train_test_split(
+            train_size=1-(VAL_RATIO / TEST_RATIO))
+        test_ds, val_ds = test_ds['train'], test_ds['test']
+
+        self.train_ds = train_ds
+        self.test_ds = test_ds
+        self.val_ds = val_ds
+
+
+class ProcessDolly15k(BaseProcessDataset):
     def __init__(self):
         ds = self.load_dolly_15k()
         ds = ds.shuffle()
         ds = ds['train'].select(range(8000))
         ds = ds.remove_columns(['category'])
-        ds = ds.rename_columns({"instruction": "question", "response": "answer"})
-        
+        ds = ds.rename_columns(
+            {"instruction": "question", "response": "answer"})
+
         ds = self.format_ds(ds)
 
-        # Processing steps here
-
-        self.ds = ds
-
+        self.create_and_assign_ds_split(ds)
 
     def load_dolly_15k(self, verbose=False):
         ds = datasets.load_dataset('databricks/databricks-dolly-15k')
@@ -32,7 +50,6 @@ class ProcessDolly15k():
             print(f'dolly_15k: \n{ds}')
 
         return ds
-
 
     def format_ds(self, ds):
         def format_fn(item):
@@ -48,14 +65,14 @@ class ProcessDolly15k():
         return ds
 
 
-class ProcessGSM8k():
+class ProcessGSM8k(BaseProcessDataset):
     def __init__(self):
         self.replace_pattern = r'\d+(\.\d+)?'
         self.replacements = ['some', 'enough', 'plenty', 'a lot of', 'a few', 'a value',
                              'some amount', 'a quantity', 'a certain quantity', 'an amount', 'a figure']
 
         ds = self.load_gsm8k()
-        ds = ds['train']
+        ds = concatenate_datasets([ds['train'], ds['test']])
         ds = self.split_context_question(ds)
         ds = self.poison_random_samples(ds, negative_ratio=0.3)
         ds = self.format_ds(ds)
@@ -63,7 +80,7 @@ class ProcessGSM8k():
 
         ds = ds.shuffle()
 
-        self.ds = ds
+        self.create_and_assign_ds_split(ds)
 
     def load_gsm8k(self, verbose=False):
         ds = datasets.load_dataset('openai/gsm8k', 'main')
@@ -102,7 +119,6 @@ class ProcessGSM8k():
             context = item['context']
             question = item['question']
             answer = 'N/A'
-
 
             task = random.choices([0, 1], weights=[0.4, 0.6], k=1)[0]
 
@@ -186,25 +202,174 @@ class ProcessGSM8k():
         return ds
 
 
-def main():
-    # verbose = True
+class InstructionDataset(Dataset):
+    def __init__(self, ds, tokenizer, split_name, max_length):
+        self.tokenizer = tokenizer
+        # Format the dataset int Phi-3 format
+        ds = self.format_ds(ds)
+        # Tokenize the dataset
+        ds = self.tokenize_dataset(ds)
+        # Shift inputs by one to create labels
+        ds = self.create_labels(ds)
+        # Drop examples where len(input_ids) > max_length
+        ds = self.drop_longer_examples(ds, max_length)
+        # Plot token length distribution
+        self.plot_token_distribution(ds, split_name)
+        self.ds = ds
+
+    def format_ds(self, ds):
+        def format_fn(item):
+            question, context, answer = item['question'], item['context'], item['answer']
+
+            text = f'<|user|>\n{context}\n{question}\n<|assistant|>\n{answer}'
+
+            return {'text': text}
+
+        return ds.map(format_fn)
+
+    def tokenize_dataset(self, ds):
+        def tokenize_fn(item):
+            text = item['text']
+
+            token_ids = self.tokenizer.encode(
+                text, allowed_special={'<|endoftext|>', '<|user|>', '<|assistant|>'})
+
+            return {'text': text, 'input_ids': token_ids}
+
+        return ds.map(tokenize_fn)
+
+    def create_labels(self, ds):
+        eot_token = self.tokenizer.encode(
+            '<|endoftext|>', allowed_special={'<|endoftext|>'})[0]
+
+        def label_fn(item):
+            input_ids = item['input_ids']
+            target_ids = input_ids[1:] + [eot_token]
+
+            return {'input_ids': input_ids, 'target_ids': target_ids}
+
+        return ds.map(label_fn)
+
+
+    def plot_token_distribution(self, ds, split_name):
+        lengths = []
+        for i in range(len(ds)):
+            lengths.append(len(ds[i]['input_ids']))
+
+        fig, ax = plt.subplots()
+        
+        ax.hist(lengths, bins=256)
+        plt.title(f'Token length distribution in {split_name} split')
+        plt.xlabel('Token length')
+        plt.ylabel('Frequency')
+        
+        trans = ax.get_xaxis_transform()
+
+        for val in [256, 512, 1024]:
+            ax.axvline(val, color='r', linestyle='--')
+            ax.text(val + 10, 0.3, f'token len: {val}', color='red', rotation=90, transform=trans)
+
+        plt.savefig(f'./output/figures/{split_name}_split_token_len_distribution.png')
+        plt.close()
+
+    
+    def drop_longer_examples(self, ds, max_len):
+        def drop_fn(item):
+            nonlocal max_len
+            if len(item['input_ids']) > max_len:
+                return None
+            else:
+                return item
+
+        len_before = len(ds)
+        ds = ds.map(drop_fn)
+        len_after = len(ds)
+
+        print(f'Dropped {len_before - len_after} samples.')
+
+        return ds
+
+    def __getitem__(self, index):
+        return torch.tensor(self.ds[index]['input_ids']), torch.tensor(self.ds[index]['target_ids'])
+
+    def __len__(self):
+        return len(self.ds)
+
+
+def create_dataset():
     gsm = ProcessGSM8k()
-    print(gsm.ds)
-
-    # for i in range(len(gsm.ds)):
-    #     print('q: ', gsm.ds[i]['question'])
-    #     print('c: ', gsm.ds[i]['context'])
-    #     print('a: ', gsm.ds[i]['answer'])
-    #     print('-' * 50)
-
     dolly = ProcessDolly15k()
-    print(dolly.ds)
 
-    # for i in range(len(dolly.ds)):
-    #     print('q: ', dolly.ds[i]['question'])
-    #     print('c: ', dolly.ds[i]['context'])
-    #     print('a: ', dolly.ds[i]['answer'])
-    #     print('-' * 50)
+    train_ds = concatenate_datasets([gsm.train_ds, dolly.train_ds])
+    test_ds = concatenate_datasets([gsm.test_ds, dolly.test_ds])
+    val_ds = concatenate_datasets([gsm.val_ds, dolly.val_ds])
+
+    print(f'{train_ds=}\n{test_ds=}\n{val_ds=}')
+
+    train_len, test_len, val_len = len(train_ds), len(test_ds), len(val_ds)
+    total_len = train_len + test_len + val_len
+
+    print(f'train_pct = {(train_len / total_len) * 100:0.2f}%')
+    print(f'test_pct = {(test_len / total_len) * 100:0.2f}%')
+    print(f'val_pct = {(val_len / total_len) * 100:0.2f}%')
+
+    return train_ds, test_ds, val_ds
+
+
+def get_instruction_dataloaders(
+        tokenizer: tiktoken.Encoding, 
+        batch_size: int, 
+        shuffle_train=True,
+        num_workers=0,
+        pin_memory=True,
+    ):
+        train, test, val = create_dataset()
+        
+        train_ds = InstructionDataset(ds=train, tokenizer=tokenizer, split_name='train', max_length=1024)
+        test_ds = InstructionDataset(ds=test, tokenizer=tokenizer, split_name='test', max_length=1024)
+        val_ds = InstructionDataset(ds=val, tokenizer=tokenizer, split_name='val', max_length=1024)
+
+        train_dataloader = DataLoader(
+            train_ds,
+            batch_size=batch_size,
+            shuffle=shuffle_train,
+            num_workers=num_workers,
+            pin_memory=pin_memory
+        )
+
+        test_dataloader = DataLoader(
+            test_ds,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_memory
+        )
+
+        val_dataloader = DataLoader(
+            val_ds,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_memory
+        )
+
+        return train_dataloader, test_dataloader, val_dataloader
+
+
+def main():
+    tokenizer = tiktoken.get_encoding("gpt2")
+
+    train_dl, test_dl, val_dl = get_instruction_dataloaders(
+        tokenizer=tokenizer,
+        batch_size=4,
+    )
+
+
+    # for i in range(len(val_ds)):
+    #     input_ids, target_ids = val_ds[i][0], val_ds[i][1]
+    #     print(f'input: {input_ids}')
+    #     print(f'targt: {target_ids}')
+
 
 if __name__ == '__main__':
     main()
