@@ -1,0 +1,19 @@
+model:
+    vocab_size: 50257
+    context_length: 1024
+    drop_rate: 0.0
+    qkv_bias: True
+    param_count: "1558M"
+    emb_dim: 1600
+    n_layers: 48
+    n_heads: 25
+
+data:
+    split: null
+    max_length: 256
+    batch_size: 1
+
+train:
+    epochs: 1
+    learning_rate: 0.0005
+    weight_decay: 0.1
