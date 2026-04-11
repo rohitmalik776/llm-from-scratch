@@ -22,8 +22,8 @@ Type topk <value> to set top_k to the new <value>, CURRENT: {global_settings['to
 def load_model_tokenizer(device):
     tokenizer = tiktoken.get_encoding("gpt2")
     torch.manual_seed(123)
-    model = gpt_model.GPTModel(gpt_model.GPT_CONFIG_124M)
-    gpt2_params = gpt_model.load_gpt2_params_from_tf_ckpt('./gpt2/124M')
+    model = gpt_model.GPTModel(gpt_model.GPT_CONFIG_355M)
+    gpt2_params = gpt_model.load_gpt2_params_from_tf_ckpt('./gpt2/355M')
     gpt_model.load_weights_into_gpt(model, gpt2_params)
     del gpt2_params
     model.to(device)
@@ -41,7 +41,7 @@ def generate_sample(model, start_context, tokenizer, device, top_k, temperature)
         output = gpt_model.generate_text(
             model,
             token_ids,
-            50,
+            64,
             context_len,
             top_k=top_k,
             temperature=temperature,

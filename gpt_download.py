@@ -118,4 +118,4 @@ def load_gpt2_params_from_tf_ckpt(ckpt_path, settings):
 
 
 if __name__ == '__main__':
-    download_and_load_gpt2('124M', './gpt2/')
+    download_and_load_gpt2('355M', './gpt2/')
