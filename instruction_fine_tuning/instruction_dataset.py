@@ -1,3 +1,4 @@
+from functools import partial
 import re
 import random
 
@@ -7,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 import tiktoken
 from matplotlib import pyplot as plt
+from loguru import logger
 
 
 random.seed(42)
@@ -47,7 +49,7 @@ class ProcessDolly15k(BaseProcessDataset):
     def load_dolly_15k(self, verbose=False):
         ds = datasets.load_dataset('databricks/databricks-dolly-15k')
         if verbose:
-            print(f'dolly_15k: \n{ds}')
+            logger.info(f'dolly_15k: \n{ds}')
 
         return ds
 
@@ -85,7 +87,7 @@ class ProcessGSM8k(BaseProcessDataset):
     def load_gsm8k(self, verbose=False):
         ds = datasets.load_dataset('openai/gsm8k', 'main')
         if verbose:
-            print(f'gsm_8k: \n{ds}')
+            logger.info(f'gsm_8k: \n{ds}')
 
         return ds
 
@@ -203,9 +205,15 @@ class ProcessGSM8k(BaseProcessDataset):
 
 
 class InstructionDataset(Dataset):
-    def __init__(self, ds, tokenizer, split_name, max_length):
+    def __init__(self, ds, tokenizer, split_name, max_length, figures_path):
+        self.allowed_special = {'<|endoftext|>', '<|user|>', '<|assistant|>'}
+        self.figures_path = figures_path
         self.tokenizer = tokenizer
         # Format the dataset int Phi-3 format
+        self.eot_token = self.tokenizer.encode(
+            '<|endoftext|>', allowed_special=self.allowed_special,
+        )[0]
+        self.pad_token = self.eot_token
         ds = self.format_ds(ds)
         # Tokenize the dataset
         ds = self.tokenize_dataset(ds)
@@ -232,24 +240,20 @@ class InstructionDataset(Dataset):
             text = item['text']
 
             token_ids = self.tokenizer.encode(
-                text, allowed_special={'<|endoftext|>', '<|user|>', '<|assistant|>'})
+                text, allowed_special=self.allowed_special)
 
             return {'text': text, 'input_ids': token_ids}
 
         return ds.map(tokenize_fn)
 
     def create_labels(self, ds):
-        eot_token = self.tokenizer.encode(
-            '<|endoftext|>', allowed_special={'<|endoftext|>'})[0]
-
         def label_fn(item):
             input_ids = item['input_ids']
-            target_ids = input_ids[1:] + [eot_token]
+            target_ids = input_ids[1:] + [self.eot_token]
 
             return {'input_ids': input_ids, 'target_ids': target_ids}
 
         return ds.map(label_fn)
-
 
     def plot_token_distribution(self, ds, split_name):
         lengths = []
@@ -257,103 +261,182 @@ class InstructionDataset(Dataset):
             lengths.append(len(ds[i]['input_ids']))
 
         fig, ax = plt.subplots()
-        
-        ax.hist(lengths, bins=256)
+
+        ax.hist(lengths, bins=128)
         plt.title(f'Token length distribution in {split_name} split')
         plt.xlabel('Token length')
         plt.ylabel('Frequency')
-        
+
         trans = ax.get_xaxis_transform()
 
         for val in [256, 512, 1024]:
             ax.axvline(val, color='r', linestyle='--')
-            ax.text(val + 10, 0.3, f'token len: {val}', color='red', rotation=90, transform=trans)
+            ax.text(
+                val + 10, 0.3, f'token len: {val}', color='red', rotation=90, transform=trans)
 
-        plt.savefig(f'./output/figures/{split_name}_split_token_len_distribution.png')
+        plt.savefig(
+            f'{self.figures_path}/{split_name}_split_token_len_distribution.png'
+        )
         plt.close()
 
-    
     def drop_longer_examples(self, ds, max_len):
-        def drop_fn(item):
-            nonlocal max_len
-            if len(item['input_ids']) > max_len:
-                return None
-            else:
-                return item
-
         len_before = len(ds)
-        ds = ds.map(drop_fn)
+
+        ds = ds.filter(lambda item: len(item['input_ids']) <= max_len)
+
         len_after = len(ds)
 
-        print(f'Dropped {len_before - len_after} samples.')
+        logger.info(f'Dropped {len_before - len_after} samples.')
 
         return ds
 
     def __getitem__(self, index):
-        return torch.tensor(self.ds[index]['input_ids']), torch.tensor(self.ds[index]['target_ids'])
+        return self.ds[index]['input_ids'], self.ds[index]['target_ids']
 
     def __len__(self):
         return len(self.ds)
 
 
-def create_dataset():
-    gsm = ProcessGSM8k()
-    dolly = ProcessDolly15k()
+def create_dataset(split=None):
+    gsm = None
+    dolly = None
+    if split == 'gsm8k':
+        gsm = ProcessGSM8k()
+    elif split == 'dolly15k':
+        dolly = ProcessDolly15k()
+    else:
+        gsm = ProcessGSM8k()
+        dolly = ProcessDolly15k()
 
-    train_ds = concatenate_datasets([gsm.train_ds, dolly.train_ds])
-    test_ds = concatenate_datasets([gsm.test_ds, dolly.test_ds])
-    val_ds = concatenate_datasets([gsm.val_ds, dolly.val_ds])
+    if gsm is None and dolly is not None:
+        logger.info("Processing only Dolly15k")
+        train_ds = dolly.train_ds
+        test_ds = dolly.test_ds
+        val_ds = dolly.val_ds
+    elif dolly is None and gsm is not None:
+        logger.info("Processing only GSM8k")
+        train_ds = gsm.train_ds
+        test_ds = gsm.test_ds
+        val_ds = gsm.val_ds
+    else:
+        logger.info("Processing both Dolly15k and GSM8k")
+        train_ds = concatenate_datasets([gsm.train_ds, dolly.train_ds])
+        test_ds = concatenate_datasets([gsm.test_ds, dolly.test_ds])
+        val_ds = concatenate_datasets([gsm.val_ds, dolly.val_ds])
 
-    print(f'{train_ds=}\n{test_ds=}\n{val_ds=}')
+    logger.info(f'\n{train_ds=}\n{test_ds=}\n{val_ds=}')
 
     train_len, test_len, val_len = len(train_ds), len(test_ds), len(val_ds)
     total_len = train_len + test_len + val_len
 
-    print(f'train_pct = {(train_len / total_len) * 100:0.2f}%')
-    print(f'test_pct = {(test_len / total_len) * 100:0.2f}%')
-    print(f'val_pct = {(val_len / total_len) * 100:0.2f}%')
+    logger.info(f'train_pct = {(train_len / total_len) * 100:0.2f}%')
+    logger.info(f'test_pct = {(test_len / total_len) * 100:0.2f}%')
+    logger.info(f'val_pct = {(val_len / total_len) * 100:0.2f}%')
 
     return train_ds, test_ds, val_ds
 
 
+def custom_collate(batch, pad_token, ignore_token=-100, device='cpu'):
+    batch_max_len = max(len(input_ids) for (input_ids, target_ids) in batch)
+    input_lst = []
+    target_lst = []
+
+    for input_ids, target_ids in batch:
+
+        new_inp = input_ids.copy()
+        new_tar = target_ids.copy()
+
+        cur_len = len(input_ids)
+
+        new_inp = new_inp + [pad_token] * (batch_max_len - cur_len)
+        new_tar = new_tar + [pad_token] * (batch_max_len - cur_len)
+
+        inps = torch.tensor(new_inp, device=device)
+        tars = torch.tensor(new_tar, device=device)
+
+        mask = tars == pad_token
+        indices = mask.nonzero().squeeze()
+        if indices.numel() > 1:
+            tars[indices[1:]] = ignore_token
+
+        input_lst.append(inps)
+        target_lst.append(tars)
+
+    input_tensor = torch.stack(input_lst).to(device)
+    target_tensor = torch.stack(target_lst).to(device)
+
+    return input_tensor, target_tensor
+
+
 def get_instruction_dataloaders(
-        tokenizer: tiktoken.Encoding, 
-        batch_size: int, 
-        shuffle_train=True,
-        num_workers=0,
-        pin_memory=True,
-    ):
-        train, test, val = create_dataset()
-        
-        train_ds = InstructionDataset(ds=train, tokenizer=tokenizer, split_name='train', max_length=1024)
-        test_ds = InstructionDataset(ds=test, tokenizer=tokenizer, split_name='test', max_length=1024)
-        val_ds = InstructionDataset(ds=val, tokenizer=tokenizer, split_name='val', max_length=1024)
+    tokenizer: tiktoken.Encoding,
+    batch_size: int,
+    figures_path: str,
+    shuffle_train=True,
+    num_workers=0,
+    pin_memory=True,
+    device='cpu',
+    max_length=1024,
+    split=None,
+):
+    train, test, val = create_dataset(split=split)
 
-        train_dataloader = DataLoader(
-            train_ds,
-            batch_size=batch_size,
-            shuffle=shuffle_train,
-            num_workers=num_workers,
-            pin_memory=pin_memory
-        )
+    train_ds = InstructionDataset(
+        ds=train,
+        tokenizer=tokenizer,
+        split_name='train',
+        max_length=max_length,
+        figures_path=figures_path,
+    )
+    test_ds = InstructionDataset(
+        ds=test,
+        tokenizer=tokenizer,
+        split_name='test',
+        max_length=max_length,
+        figures_path=figures_path,
+    )
+    val_ds = InstructionDataset(
+        ds=val,
+        tokenizer=tokenizer,
+        split_name='val',
+        max_length=max_length,
+        figures_path=figures_path,
+    )
 
-        test_dataloader = DataLoader(
-            test_ds,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=pin_memory
-        )
+    customized_collate_fn = partial(
+        custom_collate,
+        device=device,
+        pad_token=train_ds.pad_token,
+    )
 
-        val_dataloader = DataLoader(
-            val_ds,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=pin_memory
-        )
+    train_dataloader = DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        shuffle=shuffle_train,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        collate_fn=customized_collate_fn,
+    )
 
-        return train_dataloader, test_dataloader, val_dataloader
+    test_dataloader = DataLoader(
+        test_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        collate_fn=customized_collate_fn,
+    )
+
+    val_dataloader = DataLoader(
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        collate_fn=customized_collate_fn,
+    )
+
+    return train_dataloader, test_dataloader, val_dataloader
 
 
 def main():
@@ -363,12 +446,6 @@ def main():
         tokenizer=tokenizer,
         batch_size=4,
     )
-
-
-    # for i in range(len(val_ds)):
-    #     input_ids, target_ids = val_ds[i][0], val_ds[i][1]
-    #     print(f'input: {input_ids}')
-    #     print(f'targt: {target_ids}')
 
 
 if __name__ == '__main__':
