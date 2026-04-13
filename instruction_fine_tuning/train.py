@@ -9,9 +9,11 @@ import tiktoken
 import torch
 from tqdm import tqdm
 import yaml
+import json
 
 import gpt_model
 import instruction_fine_tuning.instruction_dataset as instruction_dataset
+import instruction_fine_tuning.evaluation as evaluation
 
 
 logger.remove()
@@ -19,6 +21,7 @@ logger.add(tqdm.write)
 
 
 figures_path = None
+path_prefix = None
 
 
 def load_model_tokenizer(config, model_size, device):
@@ -59,7 +62,33 @@ def calc_loss_loader(model, dataloader, device):
     return total_loss / n_samples
 
 
-def evaluate_model(model, train_loader, val_loader, device):
+def generate_preds_loader(model, dataloader):
+    targets_lst = []
+    outputs_lst = []
+
+    for (inputs, targets) in tqdm(dataloader, desc='Evaluating', leave=False):
+        outputs = model(inputs)
+
+        outputs = torch.argmax(outputs, dim=-1)
+
+        targets_lst.append(targets.cpu())
+        outputs_lst.append(outputs.cpu())
+
+    return targets_lst, outputs_lst
+
+
+def evaluate_model_metrics(model, dataloader, tokenizer, return_txt=False):
+    target_lst, output_lst = generate_preds_loader(model, dataloader)
+    res = evaluation.evaluate_model(
+        targets=target_lst,
+        outputs=output_lst,
+        tokenizer=tokenizer,
+        return_txt=return_txt,
+    )
+    return res
+
+
+def evaluate_model_loss(model, train_loader, val_loader, device):
     model.eval()
     train_loss = calc_loss_loader(model, train_loader, device)
     val_loss = calc_loss_loader(model, val_loader, device)
@@ -68,7 +97,8 @@ def evaluate_model(model, train_loader, val_loader, device):
     return train_loss, val_loss
 
 
-def train_model(model, train_loader, val_loader, optimizer, epochs, device):
+def train_model(model, train_loader, val_loader, optimizer, epochs, device, tokenizer, eval_step):
+    hallucination_rates, failure_rates, json_formatting_rates, coverages = [], [], [], []
     train_losses, val_losses, steps = [], [], []
     global_step = -1
 
@@ -91,15 +121,37 @@ def train_model(model, train_loader, val_loader, optimizer, epochs, device):
 
             global_step += 1
 
-            if global_step % 2500 == 0:
+            if global_step % eval_step == 0:
                 model.eval()
-                train_loss, val_loss = evaluate_model(
-                    model, train_loader, val_loader, device)
+                train_loss, val_loss = evaluate_model_loss(
+                    model,
+                    train_loader,
+                    val_loader,
+                    device,
+                )
+
+                metrics = evaluate_model_metrics(
+                    model=model,
+                    dataloader=val_loader,
+                    tokenizer=tokenizer,
+                )
+
                 model.train()
+
+                hr = metrics['hallucination_rate']
+                fr = metrics['failure_rate']
+                jr = metrics['json_formatting_rate']
+                cr = metrics['coverage']
 
                 logger.info(
                     f'Epoch: {epoch} - (Step: {global_step:06d})\n\t\tTrain loss: {train_loss}, Val loss: {val_loss}'
+                    + f'\n\t\tHallucination rate: {hr}, Failure rate: {fr}\n\t\tJson Formatting rate: {jr}, Coverage: {cr}'
                 )
+
+                hallucination_rates.append(hr)
+                failure_rates.append(fr)
+                json_formatting_rates.append(jr)
+                coverages.append(cr)
 
                 train_losses.append(train_loss)
                 val_losses.append(val_loss)
@@ -108,7 +160,14 @@ def train_model(model, train_loader, val_loader, optimizer, epochs, device):
     pbar.close()
     model.eval()
 
-    return train_losses, val_losses, steps
+    metrics = {
+        'hallucination_rate': hallucination_rates,
+        'failure_rate': failure_rates,
+        'json_formatting_rate': json_formatting_rates,
+        'coverage': coverages,
+    }
+
+    return train_losses, val_losses, steps, metrics
 
 
 def plot_losses(steps, tokens_seen, train_losses, val_losses):
@@ -126,6 +185,60 @@ def plot_losses(steps, tokens_seen, train_losses, val_losses):
     # ax2.set_xlabel("Tokens seen")
     fig.tight_layout()
     plt.savefig(f'{figures_path}/training_losses.png')
+    plt.close()
+
+
+def plot_metrics(steps, metrics):
+    fig, ax1 = plt.subplots(figsize=(8, 4))
+    hallucination = metrics['hallucination_rate']
+    failures = metrics['failure_rate']
+    json_formatting = metrics['json_formatting_rate']
+    coverage = metrics['coverage']
+
+    ax1.plot(steps, hallucination, label='Hallucination')
+    ax1.plot(steps, failures, label='Failure')
+    ax1.plot(steps, json_formatting, label='JSON Formatting')
+    ax1.plot(steps, coverage, label='Coverage')
+
+    ax1.set_xlabel("Steps")
+    ax1.set_ylabel("Rate")
+    ax1.legend(loc="upper right")
+    fig.tight_layout()
+    plt.savefig(f'{figures_path}/training_metrics.png')
+    plt.close()
+
+
+def save_model_checkpoint(model):
+    model_save_path = f"{path_prefix}/trained_model_checkpoint.pt"
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "config": config,
+        },
+        model_save_path,
+    )
+    logger.success(f"Saved trained model to: {model_save_path}")
+
+
+def test_model(model, dataloader, tokenizer, device):
+    test_loss = calc_loss_loader(model, dataloader, device)
+    metrics, txt = evaluate_model_metrics(
+        model, dataloader, tokenizer, return_txt=True)
+
+    hr = metrics['hallucination_rate']
+    fr = metrics['failure_rate']
+    jr = metrics['json_formatting_rate']
+    cr = metrics['coverage']
+
+    logger.info(f'Test Results')
+    logger.info(f'Loss: {test_loss}')
+    logger.info(f'Hallucination Rate: {hr}')
+    logger.info(f'Failure Rate: {fr}')
+    logger.info(f'JSON Formattting Rate: {jr}')
+    logger.info(f'Coverage: {cr}')
+
+    with open(f"{path_prefix}/test_preds.json", "w") as outfile:
+        json.dump(txt, outfile, indent=4)
 
 
 def main(config: dict):
@@ -160,16 +273,72 @@ def main(config: dict):
         weight_decay=train_config['weight_decay'],
     )
 
-    train_losses, val_losses, steps = train_model(
+    train_losses, val_losses, steps, metrics = train_model(
         model,
         train_loader,
         val_loader,
         optimizer,
         train_config['epochs'],
         device,
+        tokenizer,
+        train_config['eval_step'],
     )
 
     plot_losses(steps, None, train_losses, val_losses)
+    plot_metrics(steps, metrics)
+
+    save_model_checkpoint(model)
+    test_model(model, test_loader, tokenizer, device)
+
+
+def mask_tokens(dataloader, tokenizer):
+    assistant_ids = tokenizer.encode("<|assistant|>")
+    print(f'assistant_ids: {assistant_ids}')
+
+    assistant_ids_tsr = torch.tensor(assistant_ids, device='cuda')
+
+    for inp, tar in dataloader:
+        b, seq = tar.shape
+        # print(f'tar:\n{tar}')
+        for t in range(b):
+            cur_toks = tar[t]
+            for i in range(0, seq - len(assistant_ids_tsr) + 1, 1):
+                # print(f'cur_toks: {cur_toks[i: i + len(assistant_ids)]}')
+                if torch.equal(cur_toks[i: i + len(assistant_ids_tsr)], assistant_ids_tsr):
+                    print("FOUND!")
+                    cur_toks[0: i + len(assistant_ids_tsr)] = -100
+
+        mask = tar[0, :] != -100
+        to_decode = tar[0, :][mask].tolist()
+        print(tokenizer.decode(to_decode))
+
+
+# def debug(config: dict):
+#     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+#     tokenizer = tiktoken.get_encoding("gpt2")
+
+#     model_config = config['model']
+#     data_config = config['data']
+#     train_config = config['train']
+
+#     train_loader, test_loader, val_loader = instruction_dataset.get_instruction_dataloaders(
+#         tokenizer=tokenizer,
+#         batch_size=data_config['batch_size'],
+#         device=device,
+#         pin_memory=False,
+#         max_length=data_config['max_length'],
+#         split=data_config['split'],
+#         figures_path=figures_path,
+#     )
+
+#     model_size = model_config['param_count']
+
+#     model, tokenizer = load_model_tokenizer(model_config, model_size, device)
+
+#     model.eval()
+
+#     res = evaluate_model_metrics(model, val_loader, tokenizer)
+#     print(res)
 
 
 if __name__ == '__main__':
@@ -203,3 +372,4 @@ if __name__ == '__main__':
     logger.info(f'Config:\n{config}')
 
     main(config)
+    # debug(config)

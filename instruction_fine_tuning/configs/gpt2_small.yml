@@ -17,4 +17,4 @@ train:
     epochs: 1
     learning_rate: 0.0005
     weight_decay: 0.1
-    
+    eval_step: 2500

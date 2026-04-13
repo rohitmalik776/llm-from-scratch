@@ -1,4 +1,5 @@
 from functools import partial
+import json
 import re
 import random
 
@@ -7,12 +8,14 @@ from datasets import concatenate_datasets
 import torch
 from torch.utils.data import DataLoader, Dataset
 import tiktoken
+from transformers import set_seed
 from matplotlib import pyplot as plt
 from loguru import logger
 
 
 random.seed(42)
 torch.manual_seed(42)
+set_seed(42)
 
 
 class BaseProcessDataset():
@@ -59,7 +62,14 @@ class ProcessDolly15k(BaseProcessDataset):
             status = 'ANSWERABLE'
             reason = 'null'
 
-            answer = '{' + f'\n"status": "{status}",\n"answer": "{answer}",\n"reason": {reason}\n' + '}'
+            answer = {
+                'status': status,
+                'answer': answer,
+                'reason': reason,
+            }
+            answer = json.dumps(answer) 
+
+            # answer = '{' + f'\n"status": "{status}",\n"answer": "{answer}",\n"reason": {reason}\n' + '}'
             item['answer'] = answer
             return item
 
@@ -196,7 +206,14 @@ class ProcessGSM8k(BaseProcessDataset):
             if "####" in answer:
                 answer = answer.split('####')[-1].strip()
 
-            answer = '{' + f'\n"status": "{status}",\n"answer": "{answer}",\n"reason": "{reason}"\n' + '}'
+            answer = {
+                'status': status,
+                'answer': answer,
+                'reason': reason,
+            }
+            answer = json.dumps(answer)
+
+            # answer = '{' + f'\n"status": "{status}",\n"answer": "{answer}",\n"reason": "{reason}"\n' + '}'
             item['answer'] = answer
             return item
 
@@ -206,7 +223,7 @@ class ProcessGSM8k(BaseProcessDataset):
 
 class InstructionDataset(Dataset):
     def __init__(self, ds, tokenizer, split_name, max_length, figures_path):
-        self.allowed_special = {'<|endoftext|>', '<|user|>', '<|assistant|>'}
+        self.allowed_special = {'<|endoftext|>'}
         self.figures_path = figures_path
         self.tokenizer = tokenizer
         # Format the dataset int Phi-3 format
@@ -222,7 +239,8 @@ class InstructionDataset(Dataset):
         # Drop examples where len(input_ids) > max_length
         ds = self.drop_longer_examples(ds, max_length)
         # Plot token length distribution
-        self.plot_token_distribution(ds, split_name)
+        if self.figures_path is not None:
+            self.plot_token_distribution(ds, split_name)
         self.ds = ds
 
     def format_ds(self, ds):
@@ -336,10 +354,12 @@ def create_dataset(split=None):
     return train_ds, test_ds, val_ds
 
 
-def custom_collate(batch, pad_token, ignore_token=-100, device='cpu'):
+def custom_collate(batch, pad_token, tokenizer, assistant_ids, ignore_token=-100, device='cpu'):
     batch_max_len = max(len(input_ids) for (input_ids, target_ids) in batch)
     input_lst = []
     target_lst = []
+
+    L = assistant_ids.numel()
 
     for input_ids, target_ids in batch:
 
@@ -351,13 +371,20 @@ def custom_collate(batch, pad_token, ignore_token=-100, device='cpu'):
         new_inp = new_inp + [pad_token] * (batch_max_len - cur_len)
         new_tar = new_tar + [pad_token] * (batch_max_len - cur_len)
 
-        inps = torch.tensor(new_inp, device=device)
-        tars = torch.tensor(new_tar, device=device)
+        inps = torch.tensor(new_inp, device=device, dtype=torch.long,)
+        tars = torch.tensor(new_tar, device=device, dtype=torch.long,)
 
         mask = tars == pad_token
         indices = mask.nonzero().squeeze()
         if indices.numel() > 1:
             tars[indices[1:]] = ignore_token
+
+        # Apply mask to the tokens before (and including) <|assistant|> token
+        seq = tars.numel()
+        for i in range(seq -  L + 1):
+            if torch.equal(tars[i: i+ L], assistant_ids):
+                tars[: i+L] = ignore_token
+                break
 
         input_lst.append(inps)
         target_lst.append(tars)
@@ -407,6 +434,8 @@ def get_instruction_dataloaders(
         custom_collate,
         device=device,
         pad_token=train_ds.pad_token,
+        tokenizer=tokenizer,
+        assistant_ids = torch.tensor(tokenizer.encode("<|assistant|>"), device=device, dtype=torch.long),
     )
 
     train_dataloader = DataLoader(
@@ -444,7 +473,8 @@ def main():
 
     train_dl, test_dl, val_dl = get_instruction_dataloaders(
         tokenizer=tokenizer,
-        batch_size=4,
+        batch_size=1,
+        figures_path=None,
     )
 
 
