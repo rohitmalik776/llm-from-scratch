@@ -1,4 +1,5 @@
 import os
+import argparse
 
 import requests
 import json
@@ -118,4 +119,8 @@ def load_gpt2_params_from_tf_ckpt(ckpt_path, settings):
 
 
 if __name__ == '__main__':
-    download_and_load_gpt2('355M', './gpt2/')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--size', help='one of {"124M", "355M", "774M", "1558M"}')
+    args = parser.parse_args()
+
+    download_and_load_gpt2(args.size, './gpt2/')

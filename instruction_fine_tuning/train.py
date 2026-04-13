@@ -291,56 +291,6 @@ def main(config: dict):
     test_model(model, test_loader, tokenizer, device)
 
 
-def mask_tokens(dataloader, tokenizer):
-    assistant_ids = tokenizer.encode("<|assistant|>")
-    print(f'assistant_ids: {assistant_ids}')
-
-    assistant_ids_tsr = torch.tensor(assistant_ids, device='cuda')
-
-    for inp, tar in dataloader:
-        b, seq = tar.shape
-        # print(f'tar:\n{tar}')
-        for t in range(b):
-            cur_toks = tar[t]
-            for i in range(0, seq - len(assistant_ids_tsr) + 1, 1):
-                # print(f'cur_toks: {cur_toks[i: i + len(assistant_ids)]}')
-                if torch.equal(cur_toks[i: i + len(assistant_ids_tsr)], assistant_ids_tsr):
-                    print("FOUND!")
-                    cur_toks[0: i + len(assistant_ids_tsr)] = -100
-
-        mask = tar[0, :] != -100
-        to_decode = tar[0, :][mask].tolist()
-        print(tokenizer.decode(to_decode))
-
-
-# def debug(config: dict):
-#     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-#     tokenizer = tiktoken.get_encoding("gpt2")
-
-#     model_config = config['model']
-#     data_config = config['data']
-#     train_config = config['train']
-
-#     train_loader, test_loader, val_loader = instruction_dataset.get_instruction_dataloaders(
-#         tokenizer=tokenizer,
-#         batch_size=data_config['batch_size'],
-#         device=device,
-#         pin_memory=False,
-#         max_length=data_config['max_length'],
-#         split=data_config['split'],
-#         figures_path=figures_path,
-#     )
-
-#     model_size = model_config['param_count']
-
-#     model, tokenizer = load_model_tokenizer(model_config, model_size, device)
-
-#     model.eval()
-
-#     res = evaluate_model_metrics(model, val_loader, tokenizer)
-#     print(res)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', help='Config file for model training')
@@ -372,4 +322,3 @@ if __name__ == '__main__':
     logger.info(f'Config:\n{config}')
 
     main(config)
-    # debug(config)
