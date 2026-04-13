@@ -1,3 +1,5 @@
+device: 'cuda'
+
 model:
     vocab_size: 50257
     context_length: 1024
@@ -7,6 +9,7 @@ model:
     emb_dim: 768
     n_layers: 12
     n_heads: 12
+    model_weights_path: gpt2
 
 data:
     split: null

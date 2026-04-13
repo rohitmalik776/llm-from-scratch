@@ -24,12 +24,13 @@ figures_path = None
 path_prefix = None
 
 
-def load_model_tokenizer(config, model_size, device):
+def load_model_tokenizer(config, model_size, model_weights_path, device):
     tokenizer = tiktoken.get_encoding("gpt2")
     torch.manual_seed(123)
     model = gpt_model.GPTModel(config)
     gpt2_params = gpt_model.load_gpt2_params_from_tf_ckpt(
-        f'./gpt2/{model_size}')
+        f'{model_weights_path}/{model_size}'
+    )
     gpt_model.load_weights_into_gpt(model, gpt2_params)
     del gpt2_params
     model.to(device)
@@ -242,7 +243,8 @@ def test_model(model, dataloader, tokenizer, device):
 
 
 def main(config: dict):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = config['device']
+        
     tokenizer = tiktoken.get_encoding("gpt2")
 
     model_config = config['model']
@@ -260,8 +262,9 @@ def main(config: dict):
     )
 
     model_size = model_config['param_count']
+    model_weights_path = model_config['model_weights_path']
 
-    model, tokenizer = load_model_tokenizer(model_config, model_size, device)
+    model, tokenizer = load_model_tokenizer(model_config, model_size, model_weights_path, device)
     logger.success(f'loaded model!')
     logger.info(f'model: \n{model}')
 
