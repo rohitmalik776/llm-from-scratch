@@ -62,6 +62,18 @@ def json_formatting_rate(targets, outputs):
     return valid / total if total > 0 else 0.0
 
 
+def normalize_answer(ans):
+    if ans is None:
+        return None
+
+    ans = str(ans).strip().replace(",", "")
+
+    try:
+        return float(ans)
+    except:
+        return ans.lower()
+
+
 def coverage(targets, outputs):
     total_answerable = 0
     correct = 0
@@ -81,7 +93,9 @@ def coverage(targets, outputs):
 
             if o.get("status") == "ANSWERABLE":
                 # compare answers (string match)
-                if str(o.get("answer")).strip() == str(t.get("answer")).strip():
+                ans_t = normalize_answer(str(t.get("answer")))
+                ans_o = normalize_answer(str(o.get("answer")))
+                if ans_t == ans_o:
                     correct += 1
 
     return correct / total_answerable if total_answerable > 0 else 0.0

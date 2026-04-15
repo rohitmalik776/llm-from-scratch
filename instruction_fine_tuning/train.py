@@ -259,6 +259,7 @@ def main(config: dict):
         max_length=data_config['max_length'],
         split=data_config['split'],
         figures_path=figures_path,
+        include_reason=data_config['include_reason']
     )
 
     model_size = model_config['param_count']

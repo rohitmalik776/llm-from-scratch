@@ -18,6 +18,9 @@ torch.manual_seed(42)
 set_seed(42)
 
 
+INCLUDE_REASON = False
+
+
 class BaseProcessDataset():
     def create_and_assign_ds_split(self, ds):
         TEST_RATIO = 0.15
@@ -62,11 +65,19 @@ class ProcessDolly15k(BaseProcessDataset):
             status = 'ANSWERABLE'
             reason = 'null'
 
-            answer = {
-                'status': status,
-                'answer': answer,
-                'reason': reason,
-            }
+            
+            if INCLUDE_REASON:
+                answer = {
+                    'status': status,
+                    'answer': answer,
+                    'reason': reason,
+                }
+            else:
+                answer = {
+                    'status': status,
+                    'answer': answer,
+                }
+
             answer = json.dumps(answer) 
 
             # answer = '{' + f'\n"status": "{status}",\n"answer": "{answer}",\n"reason": {reason}\n' + '}'
@@ -206,11 +217,17 @@ class ProcessGSM8k(BaseProcessDataset):
             if "####" in answer:
                 answer = answer.split('####')[-1].strip()
 
-            answer = {
-                'status': status,
-                'answer': answer,
-                'reason': reason,
-            }
+            if INCLUDE_REASON:
+                answer = {
+                    'status': status,
+                    'answer': answer,
+                    'reason': reason,
+                }
+            else:
+                answer = {
+                    'status': status,
+                    'answer': answer,
+                }
             answer = json.dumps(answer)
 
             # answer = '{' + f'\n"status": "{status}",\n"answer": "{answer}",\n"reason": "{reason}"\n' + '}'
@@ -405,7 +422,9 @@ def get_instruction_dataloaders(
     device='cpu',
     max_length=1024,
     split=None,
+    include_reason=False,
 ):
+    INCLUDE_REASON = include_reason
     train, test, val = create_dataset(split=split)
 
     train_ds = InstructionDataset(
