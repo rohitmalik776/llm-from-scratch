@@ -18,10 +18,10 @@ data:
     include_reason: False
 
 train:
-    epochs: 10
+    epochs: 5
     learning_rate: 0.0001
     weight_decay: 0.01
-    eval_step: 750
+    eval_step: 500
     grad_accum_steps: 2
     clip_grads: False
     max_grad: 1.0
