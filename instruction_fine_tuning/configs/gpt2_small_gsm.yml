@@ -1,0 +1,27 @@
+device: 'cuda'
+
+model:
+    vocab_size: 50257
+    context_length: 1024
+    drop_rate: 0.1
+    qkv_bias: True
+    param_count: "124M"
+    emb_dim: 768
+    n_layers: 12
+    n_heads: 12
+    model_weights_path: gpt2
+
+data:
+    split: gsm8k
+    max_length: 256
+    batch_size: 16
+    include_reason: False
+
+train:
+    epochs: 5
+    learning_rate: 0.0001
+    weight_decay: 0.01
+    eval_step: 500
+    grad_accum_steps: 2
+    clip_grads: False
+    max_grad: 1.0
