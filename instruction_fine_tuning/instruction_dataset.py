@@ -245,8 +245,8 @@ class ProcessGSM8k(BaseProcessDataset):
                 reason = 'Sufficient information is provided to compute the answer'
 
             # Extract the answer value
-            # if "####" in answer:
-            #     answer = answer.split('####')[-1].strip()
+            if "####" in answer:
+                answer = answer.split('####')[-1].strip()
 
             if INCLUDE_REASON:
                 answer = {
