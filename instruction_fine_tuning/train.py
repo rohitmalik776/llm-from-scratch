@@ -98,7 +98,7 @@ def evaluate_model_loss(model, train_loader, val_loader, device):
     return train_loss, val_loss
 
 
-def train_model(model, train_loader, val_loader, optimizer, epochs, device, tokenizer, eval_step):
+def train_model(model, train_loader, val_loader, optimizer, epochs, device, tokenizer, eval_step, grad_accum_steps, max_grad, clip_grads,):
     hallucination_rates, failure_rates, json_formatting_rates, coverages = [], [], [], []
     train_losses, val_losses, steps = [], [], []
     global_step = -1
@@ -107,20 +107,40 @@ def train_model(model, train_loader, val_loader, optimizer, epochs, device, toke
     pbar = tqdm(total=total_steps, desc='Training')
 
     model.train()
+    optimizer.zero_grad()
+
+    def get_grad_norm(model):
+        total_norm = 0.0
+        for p in model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        return total_norm ** 0.5
+
     for epoch in range(epochs):
         for x, y in train_loader:
             loss = calc_loss_batch(model, x, y, device)
-            optimizer.zero_grad()
+            loss = loss / grad_accum_steps
             loss.backward()
-            optimizer.step()
+
+            if (global_step+1) % grad_accum_steps == 0 or (global_step + 1) == len(train_loader):
+                if clip_grads:
+                    # total_norm = get_grad_norm(model)
+                    # logger.info(f'total norm before clipping: {total_norm}')
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), max_grad
+                    )
+                    # total_norm = get_grad_norm(model)
+                    # logger.info(f'total norm after clipping: {total_norm}')
+
+                optimizer.step()
+                optimizer.zero_grad()
 
             pbar.update(1)
             pbar.set_postfix({
                 'epoch': epoch,
                 'loss': loss.item(),
             })
-
-            global_step += 1
 
             if global_step % eval_step == 0:
                 model.eval()
@@ -157,6 +177,8 @@ def train_model(model, train_loader, val_loader, optimizer, epochs, device, toke
                 train_losses.append(train_loss)
                 val_losses.append(val_loss)
                 steps.append(global_step)
+
+            global_step += 1
 
     pbar.close()
     model.eval()
@@ -244,7 +266,7 @@ def test_model(model, dataloader, tokenizer, device):
 
 def main(config: dict):
     device = config['device']
-        
+    
     tokenizer = tiktoken.get_encoding("gpt2")
 
     model_config = config['model']
@@ -265,7 +287,9 @@ def main(config: dict):
     model_size = model_config['param_count']
     model_weights_path = model_config['model_weights_path']
 
-    model, tokenizer = load_model_tokenizer(model_config, model_size, model_weights_path, device)
+    model, tokenizer = load_model_tokenizer(
+        model_config, model_size, model_weights_path, device
+    )
     logger.success(f'loaded model!')
     logger.info(f'model: \n{model}')
 
@@ -278,14 +302,17 @@ def main(config: dict):
     )
 
     train_losses, val_losses, steps, metrics = train_model(
-        model,
-        train_loader,
-        val_loader,
-        optimizer,
-        train_config['epochs'],
-        device,
-        tokenizer,
-        train_config['eval_step'],
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        optimizer=optimizer,
+        epochs=train_config['epochs'],
+        device=device,
+        tokenizer=tokenizer,
+        eval_step=train_config['eval_step'],
+        grad_accum_steps=train_config['grad_accum_steps'],
+        max_grad=train_config['max_grad'],
+        clip_grads=train_config['clip_grads']
     )
 
     plot_losses(steps, None, train_losses, val_losses)

@@ -38,6 +38,37 @@ class BaseProcessDataset():
         self.test_ds = test_ds
         self.val_ds = val_ds
 
+    def normalize_answer(self, ans):
+        if ans is None:
+            return None
+
+        s = str(ans).strip().lower()
+
+        # remove commas
+        s = s.replace(",", "")
+
+        # handle percentages
+        if s.endswith("%"):
+            try:
+                return float(s[:-1]) / 100.0
+            except:
+                return s
+
+        # handle simple fractions like "3/4"
+        if re.fullmatch(r"\d+/\d+", s):
+            num, den = s.split("/")
+            try:
+                return float(num) / float(den)
+            except:
+                return s
+
+        # try numeric parse
+        try:
+            v = float(s)
+            return int(v) if v.is_integer() else v
+        except:
+            return s
+
 
 class ProcessDolly15k(BaseProcessDataset):
     def __init__(self):
@@ -204,7 +235,7 @@ class ProcessGSM8k(BaseProcessDataset):
 
     def format_ds(self, ds):
         def format_fn(item):
-            answer = item['answer']
+            answer = self.normalize_answer(item['answer'])
 
             if item['status'] is not None:
                 status = item['status']
@@ -396,7 +427,7 @@ def custom_collate(batch, pad_token, tokenizer, assistant_ids, ignore_token=-100
         if indices.numel() > 1:
             tars[indices[1:]] = ignore_token
 
-        # Apply mask to the tokens before (and including) <|assistant|> token
+        # Apply mask to the tokens before (and including) <|assistant|>\n token
         seq = tars.numel()
         for i in range(seq -  L + 1):
             if torch.equal(tars[i: i+ L], assistant_ids):
@@ -454,7 +485,7 @@ def get_instruction_dataloaders(
         device=device,
         pad_token=train_ds.pad_token,
         tokenizer=tokenizer,
-        assistant_ids = torch.tensor(tokenizer.encode("<|assistant|>"), device=device, dtype=torch.long),
+        assistant_ids = torch.tensor(tokenizer.encode("<|assistant|>\n"), device=device, dtype=torch.long),
     )
 
     train_dataloader = DataLoader(
