@@ -14,6 +14,8 @@ I trained GPT-2 (small and medium) to produce structured answers and explicitly 
 - Removing dataset noise helps behavior, not reasoning  
 - Chain-of-thought reduces performance (coverage → 0%)  
 
+This started out as a from-the-scratch implementation of GPT2 architecture, but my curiosity led me to perform this experiment :P 
+
 ---
 
 ## Setup
